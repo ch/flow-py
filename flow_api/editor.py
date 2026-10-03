@@ -236,17 +236,26 @@ class FlowEditor:
             
         self.verify_and_set_settings(model=model, aspect_ratio=aspect_ratio)
         
+        clean_prompt = " ".join(prompt.split())
         pm = self.page.locator(".ProseMirror").first
         if not pm.is_visible():
             raise RuntimeError("Caixa de comando (.ProseMirror) não encontrada no canvas!")
-            
-        pm.click()
-        time.sleep(0.2)
-        self.page.keyboard.press("Control+A")
-        self.page.keyboard.press("Backspace")
-        time.sleep(0.1)
 
-        self.page.keyboard.type(prompt)
+        pm.click(force=True)
+        time.sleep(0.2)
+        pm.evaluate("""(el, text) => {
+            let p = el.querySelector('p');
+            if (!p) {
+                p = document.createElement('p');
+                el.appendChild(p);
+            }
+            p.innerText = text;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }""", clean_prompt)
+
+        self.page.keyboard.press("End")
+        self.page.keyboard.type(" ")
+        self.page.keyboard.press("Backspace")
         time.sleep(0.3)
         
         # Validação estrita se referência foi solicitada

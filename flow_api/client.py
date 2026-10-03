@@ -130,7 +130,7 @@ class FlowClient:
 
             flags = [
                 '--remote-debugging-port=9222',
-                f'--user-data-dir="{DEFAULT_PROFILE}"',
+                f'--user-data-dir={DEFAULT_PROFILE}',
                 '--no-first-run',
                 '--no-default-browser-check',
                 '--disable-background-timer-throttling',

@@ -19,7 +19,7 @@ class FlowEditor:
         if "lite" in model.lower():
             raise ValueError(f"Modelo proibido: {model}. A skill requer Nano Banana 2 ou Nano Banana Pro.")
             
-        settings_btn = self.page.locator("button[aria-label='Gatilho de configurações']").first
+        settings_btn = self.page.locator("button[aria-label='Gatilho de configurações'], button[aria-label*='Settings'], button[aria-label*='Configurações']").first
         if settings_btn.is_visible():
             text = settings_btn.inner_text()
             safe_text = text.encode('ascii', errors='replace').decode('ascii')
@@ -41,26 +41,26 @@ class FlowEditor:
             time.sleep(1)
             
             # 1. Garante que está na aba Imagem
-            img_tab = self.page.locator("button:has-text('Imagem')").first
+            img_tab = self.page.locator(".cdk-overlay-container button:has-text('Imagem'), .cdk-overlay-container button:has-text('Image'), .cdk-overlay-container mat-button-toggle:has-text('Image')").first
             if img_tab.is_visible():
-                img_tab.click()
+                img_tab.click(force=True)
                 time.sleep(0.5)
             
             # 2. Altera ratio se necessário
-            ratio_btn = self.page.locator(f"button:has-text('{aspect_ratio}')").first
+            ratio_btn = self.page.locator(f".cdk-overlay-container .toggle-label:has-text('{aspect_ratio}'), .cdk-overlay-container mat-button-toggle:has-text('{aspect_ratio}'), .cdk-overlay-container button:has-text('{aspect_ratio}')").first
             if ratio_btn.is_visible():
-                ratio_btn.click()
+                ratio_btn.click(force=True)
                 time.sleep(0.5)
                 log(f"[FlowEditor] Proporção alterada para {aspect_ratio}")
                     
             # 3. Altera modelo se necessário
-            curr_model = self.page.locator("button[aria-label='Selecionar família de modelos']").first
+            curr_model = self.page.locator(".cdk-overlay-container button[aria-label*='Select model family'], .cdk-overlay-container button[aria-label*='Selecionar família']").first
             if curr_model.is_visible() and model not in curr_model.inner_text():
-                curr_model.click()
-                time.sleep(0.5)
-                model_opt = self.page.locator(f"[role='option']:has-text('{model}'), button:has-text('{model}')").first
+                curr_model.click(force=True)
+                time.sleep(0.8)
+                model_opt = self.page.locator(f".mat-mdc-menu-content button:has-text('{model}'), [role='menuitem']:has-text('{model}'), [role='option']:has-text('{model}')").first
                 if model_opt.is_visible():
-                    model_opt.click()
+                    model_opt.click(force=True)
                     time.sleep(0.5)
                     log(f"[FlowEditor] Modelo alterado para {model}")
                     
@@ -119,59 +119,82 @@ class FlowEditor:
         ref_paths = references if isinstance(references, list) else [references]
                 
         # 1. Limpa chips pré-existentes na barra de comando
-        chips = self.page.locator("button.chip-container, button[aria-label='Elemento']").all()
+        chips = self.page.locator("button.chip-container, button[aria-label*='Elemento'], button[aria-label*='Ingredient']").all()
         for ch in chips:
             try:
-                ch.locator("button, [role='button'], .close, [aria-label*='remover']").first.click(force=True)
+                ch.click(force=True)
+                time.sleep(0.2)
             except Exception:
-                try:
-                    ch.click(force=True)
-                except Exception:
-                    pass
+                pass
         time.sleep(0.3)
         self.page.keyboard.press("Escape")
         time.sleep(0.2)
 
         # 2. Anexa cada uma das referências
-        add_btn = self.page.locator("button[aria-label*='Adicionar elementos']").first
+        try:
+            cookie_btn = self.page.locator("#glue-cookie-notification-bar-1 button, .glue-cookie-notification-bar button, button:has-text('Hide'), button:has-text('Accept all')").first
+            if cookie_btn.is_visible():
+                cookie_btn.click(force=True)
+                time.sleep(0.3)
+        except Exception:
+            pass
+
+        try:
+            agree_btn = self.page.locator("button:has-text('I agree'), button:has-text('Concordo')").first
+            if agree_btn.is_visible():
+                agree_btn.click(force=True)
+                time.sleep(0.3)
+        except Exception:
+            pass
+
+        add_btn = self.page.locator("button[aria-label*='Add ingredients'], button[aria-label*='Adicionar elementos']").first
         if not add_btn.is_visible():
             raise RuntimeError("Botão de adicionar elementos à caixa de comando não visível!")
 
         for ref in ref_paths:
             base_name = os.path.splitext(os.path.basename(ref))[0]
+            file_name = os.path.basename(ref)
             is_file = os.path.exists(ref)
 
             # Abre o popover 'Adicionar elementos'
             add_btn.click(force=True)
             time.sleep(0.8)
 
-            overlay = self.page.locator(".cdk-overlay-pane").first
+            overlay = self.page.locator(".cdk-overlay-pane:has(.asset-item), .cdk-overlay-pane:has(button:has-text('Upload')), .cdk-overlay-pane:has(button:has-text('Enviar'))").first
             if not overlay.is_visible():
                 raise RuntimeError("Overlay de seleção de elementos não abriu!")
 
             # Procura item existente na lista
-            target = overlay.locator(f".asset-item:has-text('{base_name}')").first
+            target = overlay.locator(f".asset-item:has-text('{file_name}'), .asset-item:has-text('{base_name}')").first
             if not target.is_visible() and is_file:
                 # Faz upload diretamente via botão Enviar mídia do próprio overlay
-                upload_btn = overlay.locator("button:has-text('Enviar mídia'), button:has-text('Enviar')").first
+                upload_btn = overlay.locator("button:has-text('Enviar mídia'), button:has-text('Enviar'), button:has-text('Upload media'), button:has-text('Upload')").first
                 if upload_btn.is_visible():
-                    log(f"[FlowEditor] Enviando arquivo de referência: {os.path.basename(ref)}...")
+                    log(f"[FlowEditor] Enviando arquivo de referência: {file_name}...")
                     with self.page.expect_file_chooser(timeout=8000) as fc_info:
-                        upload_btn.click()
+                        upload_btn.click(force=True)
                     fc_info.value.set_files(os.path.abspath(ref))
                     
-                    # Aguarda término do upload (status 'Enviando' sumir)
+                    # Aguarda término do upload (status 'Enviando'/'Uploading' sumir)
                     start_wait = time.time()
                     while time.time() - start_wait < 30:
-                        target = overlay.locator(f".asset-item:has-text('{base_name}')").first
+                        try:
+                            agree_btn = self.page.locator("button:has-text('I agree'), button:has-text('Concordo')").first
+                            if agree_btn.is_visible():
+                                agree_btn.click(force=True)
+                                time.sleep(0.5)
+                        except Exception:
+                            pass
+
+                        target = overlay.locator(f".asset-item:has-text('{file_name}'), .asset-item:has-text('{base_name}')").first
                         if target.is_visible():
                             text = target.inner_text()
-                            if "Enviando" not in text and "Carregando" not in text:
+                            if "Enviando" not in text and "Carregando" not in text and "Uploading" not in text:
                                 break
                         time.sleep(1)
 
             if not target.is_visible():
-                target = overlay.locator(f".asset-item:has-text('{os.path.basename(ref)}')").first
+                target = overlay.locator(f".asset-item:has-text('{file_name}'), .asset-item:has-text('{base_name}')").first
             if not target.is_visible():
                 target = overlay.locator(".asset-item").first
 
@@ -181,7 +204,7 @@ class FlowEditor:
                     target.click(force=True)
                     time.sleep(0.5)
 
-                include_btn = overlay.locator("button:has-text('Incluir no comando'), .detail-add-to-prompt").first
+                include_btn = overlay.locator(".detail-add-to-prompt-btn, button:has-text('Add to prompt'), button:has-text('Incluir no comando'), .detail-add-to-prompt").first
                 if include_btn.is_visible() and not include_btn.is_disabled():
                     include_btn.click(force=True)
                     time.sleep(0.5)
@@ -190,7 +213,7 @@ class FlowEditor:
             time.sleep(0.3)
 
         # Validação estrita: chips PRECISAM estar presentes na barra de comando
-        active_chips = self.page.locator("button.chip-container, button[aria-label='Elemento']").all()
+        active_chips = self.page.locator("button.chip-container, button[aria-label*='Elemento'], button[aria-label*='Ingredient']").all()
         if len(active_chips) == 0:
             raise RuntimeError(f"FALHA CRÍTICA: Chip de referência não foi anexado à barra de comando para '{references}'! Abortando geração para evitar perda de consistência.")
         log(f"[FlowEditor] {len(active_chips)} chip(s) de referência anexado(s) e validados com sucesso!")
@@ -228,12 +251,12 @@ class FlowEditor:
         
         # Validação estrita se referência foi solicitada
         if reference:
-            active_chips = self.page.locator("button.chip-container, button[aria-label='Elemento']").all()
+            active_chips = self.page.locator("button.chip-container, button[aria-label*='Elemento'], button[aria-label*='Ingredient']").all()
             if len(active_chips) == 0:
                 raise RuntimeError("FALHA CRÍTICA: O chip de referência desapareceu antes do disparo da geração!")
         
-        submit_btn = self.page.locator("button[aria-label*='geração'], button[aria-label*='Iniciar'], button.generate-icon-button, button:has-text('arrow_forward')").first
-        submit_btn.click()
+        submit_btn = self.page.locator("button[aria-label*='geração'], button[aria-label*='Iniciar'], button.generate-icon-button, button:has-text('arrow_forward'), button[aria-label*='Generate'], button[aria-label*='Start generation'], button:has-text('Generate')").first
+        submit_btn.click(force=True)
         log("[FlowEditor] Prompt enviado com sucesso!")
 
     def check_error_alerts(self) -> Optional[str]:
@@ -262,7 +285,7 @@ class FlowEditor:
 
             state = self.page.evaluate("""() => {
                 const text = document.body.innerText;
-                const isGenerating = text.includes('%') || text.includes('Gerando') || text.includes('Criando') || document.querySelector('[role="progressbar"]') !== null;
+                const isGenerating = text.includes('%') || text.includes('Gerando') || text.includes('Criando') || text.includes('Generating') || text.includes('Creating') || document.querySelector('[role="progressbar"]') !== null;
                 return { isGenerating: isGenerating };
             }""")
             if not state['isGenerating']:

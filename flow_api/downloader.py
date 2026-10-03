@@ -34,7 +34,7 @@ class FlowDownloader:
 
         # Aguarda botão de download estar visível
         try:
-            dl_btn = self.page.locator("button[aria-label*='Baixar'], button:has-text('Baixar')").first
+            dl_btn = self.page.locator("button[aria-label*='Baixar'], button:has-text('Baixar'), button[aria-label*='Download'], button:has-text('Download')").first
             dl_btn.wait_for(state="visible", timeout=8000)
         except Exception:
             pass
@@ -46,34 +46,35 @@ class FlowDownloader:
         targets = []
         for btn in buttons:
             aria = btn.get_attribute("aria-label") or ""
-            if aria and not any(nav in aria.lower() for nav in ["anterior", "próxima", "proxima"]):
+            if aria and not any(nav in aria.lower() for nav in ["anterior", "próxima", "proxima", "previous", "next"]):
                 targets.append({"element": btn, "aria": aria})
         return targets
 
     def download_current(self, resolution: str = "1K", filename: Optional[str] = None, timeout: int = 25) -> Optional[str]:
         """Baixa a mídia ativa na tela na resolução nativa especificada com fallback inteligente."""
-        default_downloads = os.path.expanduser(r"~\Downloads")
+        default_downloads = os.path.expanduser("~/Downloads")
         before_custom = set(os.listdir(self.download_dir)) if os.path.exists(self.download_dir) else set()
         before_default = set(os.listdir(default_downloads)) if os.path.exists(default_downloads) else set()
 
         # 1. Clica no botão 'Baixar mídia' se o menu não estiver aberto
         menu_open = self.page.evaluate("""() => {
             const btn = Array.from(document.querySelectorAll('button')).find(b => 
-                (b.getAttribute('aria-label') && b.getAttribute('aria-label').includes('Baixar')) ||
-                (b.innerText && b.innerText.includes('Baixar'))
+                (b.getAttribute('aria-label') && (b.getAttribute('aria-label').includes('Baixar') || b.getAttribute('aria-label').includes('Download'))) ||
+                (b.innerText && (b.innerText.includes('Baixar') || b.innerText.includes('Download')))
             );
             return btn ? btn.getAttribute('aria-expanded') === 'true' : false;
         }""")
 
         if not menu_open:
-            dl_btn = self.page.locator("button[aria-label*='Baixar'], button:has-text('Baixar')").first
+            dl_btn = self.page.locator("button[aria-label*='Baixar'], button:has-text('Baixar'), button[aria-label*='Download'], button:has-text('Download')").first
             try:
                 if dl_btn.is_visible():
                     dl_btn.click(force=True)
                 else:
                     self.page.evaluate("""() => {
                         const btn = Array.from(document.querySelectorAll('button')).find(b => 
-                            b.innerText.includes('Baixar') || b.getAttribute('aria-label')?.includes('Baixar')
+                            b.innerText.includes('Baixar') || b.getAttribute('aria-label')?.includes('Baixar') ||
+                            b.innerText.includes('Download') || b.getAttribute('aria-label')?.includes('Download')
                         );
                         if (btn) btn.click();
                     }""")
@@ -89,11 +90,12 @@ class FlowDownloader:
             item_btn = self.page.locator(".cdk-overlay-container button, .cdk-overlay-container [role='menuitem']").filter(has_text="Original").first
 
         # 3. Tenta download com expect_download nativo do Playwright
+        timeout_ms = 40000 if resolution == "2K" else 8000
         download_obj = None
         try:
-            with self.page.expect_download(timeout=5000) as dl_info:
+            with self.page.expect_download(timeout=timeout_ms) as dl_info:
                 if item_btn.is_visible():
-                    item_btn.click()
+                    item_btn.click(force=True)
                 else:
                     self.page.evaluate("""(res) => {
                         const menuItems = Array.from(document.querySelectorAll('[role="menuitem"], .mat-mdc-menu-item, button'));
@@ -130,7 +132,8 @@ class FlowDownloader:
                 pass
 
         # 4. Monitora diretamente a pasta de download (caso Page.setDownloadBehavior tenha salvo no disco)
-        for _ in range(timeout):
+        timeout_loop = 45 if resolution == "2K" else timeout
+        for _ in range(timeout_loop):
             time.sleep(1)
             if os.path.exists(self.download_dir):
                 after_custom = set(os.listdir(self.download_dir))

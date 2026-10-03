@@ -9,10 +9,53 @@ from playwright.sync_api import Page
 # Proibidos: 'Nano Banana 2 Lite' (baixa fidelidade)
 ALLOWED_IMAGE_MODELS = ["Nano Banana 2", "Nano Banana Pro"]
 
+_TILE_SNAPSHOT_JS = """() => {
+    const tiles = Array.from(document.querySelectorAll('flow-grid-tile-container'));
+    return tiles.map(tile => {
+        const img = tile.querySelector('img');
+        const src = img && img.src && !img.src.startsWith('data:') ? img.src.split('?')[0] : '';
+        const text = (tile.innerText || '').replace(/\\s+/g, ' ').trim();
+        const failed = /failed|usage limit|try again later|não foi possível|limite|quota/i.test(text);
+        if (src && !failed) return 'img:' + src;
+        if (failed) return 'err:' + text.slice(0, 220);
+        const busy = !!tile.querySelector('[role="progressbar"]') || /%|generating|gerando|criando|creating/i.test(text);
+        if (busy) return 'run';
+        return 'empty';
+    });
+}"""
+
+
+def new_image_srcs(before: List[str], after: List[str]) -> List[str]:
+    """Image URLs present now that were not on the canvas before this submit."""
+    known = {item[4:] for item in before if item.startswith("img:")}
+    found = []
+    for item in after:
+        if item.startswith("img:"):
+            src = item[4:]
+            if src not in known and src not in found:
+                found.append(src)
+    return found
+
+
+def added_error_messages(before: List[str], after: List[str]) -> List[str]:
+    """Error texts that showed up in addition to the tiles already on the canvas."""
+    before_errors = [item[4:] for item in before if item.startswith("err:")]
+    after_errors = [item[4:] for item in after if item.startswith("err:")]
+    extra = len(after_errors) - len(before_errors)
+    if extra <= 0:
+        return []
+    return after_errors[:extra]
+
+
 class FlowEditor:
     def __init__(self, page: Page):
         self.page = page
         self.uploaded_files = set()
+        self._tiles_before: Optional[List[str]] = None
+        self._new_image_srcs: List[str] = []
+
+    def snapshot_tiles(self) -> List[str]:
+        return self.page.evaluate(_TILE_SNAPSHOT_JS) or []
 
     def verify_and_set_settings(self, model: str = "Nano Banana 2", aspect_ratio: str = "16:9"):
         """Garante que o modelo e o aspect ratio configurados sigam a política estrita."""
@@ -265,6 +308,8 @@ class FlowEditor:
                 raise RuntimeError("FALHA CRÍTICA: O chip de referência desapareceu antes do disparo da geração!")
         
         submit_btn = self.page.locator("button[aria-label*='geração'], button[aria-label*='Iniciar'], button.generate-icon-button, button:has-text('arrow_forward'), button[aria-label*='Generate'], button[aria-label*='Start generation'], button:has-text('Generate')").first
+        self._tiles_before = self.snapshot_tiles()
+        self._new_image_srcs = []
         submit_btn.click(force=True)
         log("[FlowEditor] Prompt enviado com sucesso!")
 
@@ -283,28 +328,45 @@ class FlowEditor:
         }""")
 
     def wait_for_generation(self, timeout: int = 90) -> bool:
-        """Aguarda reativamente o término da renderização com monitoramento ativo de erros e políticas."""
+        """Wait until this submit produces a new image. An idle canvas is not success."""
         start_time = time.time()
-        time.sleep(4)
+        before = list(self._tiles_before or [])
+        stable_errors = 0
+        time.sleep(2)
         while time.time() - start_time < timeout:
             err = self.check_error_alerts()
             if err:
                 log(f"[FlowEditor] ❌ Erro detectado no Google Flow: {err}")
                 raise RuntimeError(f"Google Flow Error: {err}")
 
-            state = self.page.evaluate("""() => {
-                const text = document.body.innerText;
-                const isGenerating = text.includes('%') || text.includes('Gerando') || text.includes('Criando') || text.includes('Generating') || text.includes('Creating') || document.querySelector('[role="progressbar"]') !== null;
-                return { isGenerating: isGenerating };
-            }""")
-            if not state['isGenerating']:
-                log("[FlowEditor] Renderização concluída com sucesso!")
+            after = self.snapshot_tiles()
+            if any(item == "run" for item in after):
+                stable_errors = 0
+                elapsed = int(time.time() - start_time)
+                log(f"[FlowEditor] Gerando... ({elapsed}s)")
                 time.sleep(2)
+                continue
+
+            fresh = new_image_srcs(before, after)
+            errors = added_error_messages(before, after)
+            if fresh:
+                self._new_image_srcs = fresh
+                elapsed = int(time.time() - start_time)
+                log(f"[FlowEditor] Novo quadro pronto em {elapsed}s ({len(fresh)} imagem).")
+                time.sleep(1)
                 return True
-            time.sleep(2)
+            if errors:
+                stable_errors += 1
+                if stable_errors >= 2:
+                    message = errors[0]
+                    log(f"[FlowEditor] ❌ Geração não criou imagem: {message}")
+                    raise RuntimeError(f"Google Flow Error: {message}")
+            else:
+                stable_errors = 0
             elapsed = int(time.time() - start_time)
-            log(f"[FlowEditor] Gerando... ({elapsed}s)")
-            
+            log(f"[FlowEditor] Aguardando quadro novo... ({elapsed}s)")
+            time.sleep(2)
+
         log("[FlowEditor] Tempo limite esgotado para geração.")
         return False
 
